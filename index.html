@@ -845,7 +845,7 @@
            ondrop="event.preventDefault();this.style.borderColor='var(--line)';handlePackingFileDrop(event)">
         <div style="font-size:32px;margin-bottom:8px">📦</div>
         <div style="font-weight:600;font-size:14px;margin-bottom:4px">직진배송 박스패키지 파일을 여기에 끌어다 놓거나 클릭하세요</div>
-        <div style="font-size:12px;color:var(--muted)">list(2) 시트 + 박스당수량 시트(260601 등 날짜형식 · 여름 · 상품별패킹수량 순 자동 감지)가 포함된 .xlsx</div>
+        <div style="font-size:12px;color:var(--muted)">list(2) 시트 + 2번 시트(A열 상품명 · B열 수량 · C열 옵션 조건)가 포함된 .xlsx</div>
         <input type="file" id="packing-file-input" accept=".xlsx,.xls" style="display:none"
                onchange="handlePackingFileSelect(this.files[0])">
       </div>
@@ -1155,18 +1155,9 @@ async function handleFile(file){
     }
     STATE.skus = skus;
     
-    // 상품별 패킹수량 시트 (여름 시트 우선, 없으면 상품별패킹수량 시트)
-    STATE.packing = {};
-    const packSheetName = wb.Sheets['여름'] ? '여름' : '상품별패킹수량';
-    if (wb.Sheets[packSheetName]) {
-      const pack = XLSX.utils.sheet_to_json(wb.Sheets[packSheetName], {defval:null});
-      pack.forEach(r => {
-        const nm = r['상품명'] || r[Object.keys(r)[0]];
-        const qty = r['담기는 수량'] || r[Object.keys(r)[1]];
-        if (nm && qty) STATE.packing[String(nm).trim()] = Number(qty) || 20;
-      });
-    }
-    
+    // 발송추천에서도 동일한 두 번째 시트 패킹 기준 적용
+    STATE.packing = readPackingRules(wb).rules;
+
     recalculate();
     
     // UI 업데이트
@@ -1584,7 +1575,7 @@ function recalculate(){
     else if (risk === 'MEDIUM') priorityScore = 3000 + shipQty;
     else priorityScore = shipQty;
 
-    const boxSize = STATE.packing[sku['상품명']] || 20;
+    const boxSize = resolvePackingSize(STATE.packing, sku['상품명'], sku['옵션정보']);
     const boxes = shipQty > 0 ? Math.ceil(shipQty / boxSize) : 0;
 
     return {
@@ -1681,7 +1672,7 @@ function downloadFilled() {
 // ============================================================
 const PACKING_STATE = {
   records:    [],   // 패킹 파일에서 파싱한 레코드 [{product,option,qty,SKU,바코드,검품방식,시즌,공장명}]
-  boxDict:    {},   // 상품명 → 박스당수량
+  boxDict:    {},   // 상품명 → 기본 수량 및 옵션별 수량
   datePrefix: '',   // 날짜 prefix (ex: '06월01')
   origFile:   null, // 원본 Uint8Array
   fileName:   '',
@@ -1690,6 +1681,44 @@ const PACKING_STATE = {
 function handlePackingFileDrop(e) {
   const file = e.dataTransfer.files[0];
   if (file) handlePackingFileSelect(file);
+}
+
+// 2번 시트 A: 상품명, B: 기본/옵션 수량, C: 옵션 조건
+function readPackingRules(wb) {
+  const name = wb.SheetNames[1];
+  const sheet = name && wb.Sheets[name];
+  const rules = Object.create(null);
+  if (!sheet) return { name: '', rules };
+  const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:null, range:0});
+  for (const row of rows) {
+    const product = String(row[0] ?? '').trim();
+    const qty = Number(row[1]);
+    if (!product || !Number.isInteger(qty) || qty <= 0) continue;
+    const entry = rules[product] || (rules[product] = {base:null, options:Object.create(null)});
+    const condition = String(row[2] ?? '').trim().toUpperCase();
+    if (!condition) { entry.base = qty; continue; }
+    const m = condition.match(/^(SF|W|기모|여름|롱|숏)\s*(\d+)?$/u);
+    if (!m) throw new Error('미지원 패킹 조건: ' + product + ' / ' + condition);
+    const override = m[2] ? Number(m[2]) : qty;
+    if (!Number.isSafeInteger(override) || override <= 0) throw new Error('잘못된 패킹 수량: ' + product);
+    if (m[2]) entry.base = qty;
+    entry.options[m[1]] = override;
+  }
+  return { name, rules };
+}
+function resolvePackingSize(rules, product, option) {
+  const entry = rules[String(product ?? '').trim()];
+  if (!entry) return 20;
+  const opt = String(option ?? '').normalize('NFKC').toUpperCase();
+  // W와 SF는 독립 토큰만 일치; FW, WHITE 등은 제외.
+  const matches = Object.keys(entry.options).filter(key => {
+    if (key === 'W' || key === 'SF') return new RegExp('(^|[^A-Z0-9])' + key + '(?=$|[^A-Z0-9])').test(opt);
+    if (key === '기모') return /기모/.test(opt.replace(/(?:비기모|무기모|기모\s*(?:X|없음|미포함))/g, ''));
+    return opt.includes(key);
+  });
+  const sizes = [...new Set(matches.map(key => entry.options[key]))];
+  if (sizes.length > 1) throw new Error('패킹 옵션 조건 충돌: ' + product + ' / ' + option);
+  return sizes[0] ?? entry.base ?? 20;
 }
 
 function handlePackingFileSelect(file) {
@@ -1702,30 +1731,9 @@ function handlePackingFileSelect(file) {
       PACKING_STATE.fileName = file.name;
       const wb = XLSX.read(data, { type: 'array', cellStyles: true, sheetStubs: true });
 
-      // ── 박스당 수량 시트 감지
-      // 우선순위: YYYYMMDD 형식 시트명 → '여름' → '상품별패킹수량'
-      PACKING_STATE.boxDict = {};
-      const DATE_SHEET_RE = /^\d{6}$|^\d{8}$/;   // 260601 또는 20260601 형식
-      const dateSheetName = wb.SheetNames.find(n => DATE_SHEET_RE.test(n.trim()));
-      const BOX_SHEET_CANDIDATES = [
-        ...(dateSheetName ? [dateSheetName] : []),
-        '여름', '상품별패킹수량'
-      ];
-      let foundBoxSheet = null;
-      let foundBoxSheetName = '';
-      for (const sn of BOX_SHEET_CANDIDATES) {
-        if (wb.Sheets[sn]) { foundBoxSheet = wb.Sheets[sn]; foundBoxSheetName = sn; break; }
-      }
-      if (foundBoxSheet) {
-        const rows = XLSX.utils.sheet_to_json(foundBoxSheet, { defval: null });
-        rows.forEach(r => {
-          const nm  = r['상품명'] || r[Object.keys(r)[0]];
-          const qty = r['담기는 수량'] || r[Object.keys(r)[1]];
-          if (nm && qty) PACKING_STATE.boxDict[String(nm).trim()] = Number(qty) || 20;
-        });
-      } else {
-        showToast('⚠️ 박스당수량 시트를 찾을 수 없습니다 (YYYYMMDD·여름·상품별패킹수량 시트 필요)', 'warn');
-      }
+      const {name: foundBoxSheetName, rules} = readPackingRules(wb);
+      PACKING_STATE.boxDict = rules;
+      if (!foundBoxSheetName) showToast('⚠️ 두 번째 패킹 기준 시트가 없습니다. 기본 20개 적용', 'warn');
 
       // ── list(2) 시트에서 발송 레코드 ──
       const listSheet = wb.Sheets['list (2)'];
@@ -1814,16 +1822,16 @@ function buildPackingData() {
       SKU: r.SKU || '', 바코드: r.바코드 || '',
       시즌: r.시즌 || 'ALL', 공장명: r.공장명 || ''
     }));
-    getBoxSize = prod => PACKING_STATE.boxDict[prod] || 20;
+    getBoxSize = (prod, opt) => resolvePackingSize(PACKING_STATE.boxDict, prod, opt);
   } else if (STATE.computed && STATE.computed.filter(r => r.shipQty > 0).length > 0) {
     // 발송추천 탭에서 계산된 결과 활용
     sourceRecords = STATE.computed.filter(r => r.shipQty > 0).map(r => ({
-      product: r['상품명'] || '', option: r['옵션정보'] || '', qty: r.shipQty,
+      product: r.name || r.sku?.['상품명'] || '', option: r.option || r.sku?.['옵션정보'] || '', qty: r.shipQty,
       검품방식: r['검품방식'] || '패션-Standard',
       SKU: r['SKU번호'] || r['SKU'] || '', 바코드: r['상품바코드번호'] || r['바코드'] || '',
       시즌: r['시즌 속성'] || r['시즌'] || 'ALL', 공장명: r['공장상품명/옵션정보'] || ''
     }));
-    getBoxSize = prod => STATE.packing[prod] || 20;
+    getBoxSize = (prod, opt) => resolvePackingSize(STATE.packing, prod, opt);
   } else {
     return { singleBoxes: [], comboBoxes: [] };
   }
@@ -1834,7 +1842,7 @@ function buildPackingData() {
   sourceRecords.forEach(rec => {
     const prod    = rec.product;
     const opt     = rec.option;
-    const boxSize = getBoxSize(prod);
+    const boxSize = getBoxSize(prod, opt);
     let left = rec.qty;
 
     while (left > 0) {
