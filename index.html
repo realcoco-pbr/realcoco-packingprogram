@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>REALCOCO · AI PBR Management System</title>
+<title>REALCOCO · AI PBR Management System | Packing v2026.11.26.3</title>
 <!-- ========== PWA 아이콘 & 홈화면 설정 ========== -->
 <!-- 브라우저 탭 + 데스크톱 Favicon -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj4KPGRlZnM+CjxsaW5lYXJHcmFkaWVudCBpZD0iYmciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgo8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjZDY2ODQ1Ii8+CjxzdG9wIG9mZnNldD0iNTUlIiBzdG9wLWNvbG9yPSIjYzk1NDJlIi8+CjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI2EzNmIxZSIvPgo8L2xpbmVhckdyYWRpZW50Pgo8L2RlZnM+CjxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iMTA4IiBmaWxsPSJ1cmwoI2JnKSIvPgo8dGV4dCB4PSIyNTYiIHk9IjMyMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsJ1RpbWVzIE5ldyBSb21hbicsc2VyaWYiIGZvbnQtc2l6ZT0iMjQ4IiBmb250LXdlaWdodD0iNjAwIiBmaWxsPSIjZmFmNmVlIiBsZXR0ZXItc3BhY2luZz0iLTEyIj5SQzwvdGV4dD4KPGNpcmNsZSBjeD0iNDA4IiBjeT0iMTMyIiByPSI3IiBmaWxsPSIjZmFmNmVlIiBvcGFjaXR5PSIwLjg1Ii8+Cjx0ZXh0IHg9IjI1NiIgeT0iNDAyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iR2VvcmdpYSxzZXJpZiIgZm9udC1zdHlsZT0iaXRhbGljIiBmb250LXNpemU9IjM0IiBmb250LXdlaWdodD0iNDAwIiBmaWxsPSIjZmFmNmVlIiBvcGFjaXR5PSIwLjc1IiBsZXR0ZXItc3BhY2luZz0iNCI+QUkgUEJSPC90ZXh0Pgo8L3N2Zz4="/>
@@ -1707,7 +1707,7 @@ function readPackingRules(wb) {
     const entry = rules[product] || (rules[product] = {base:null, options:Object.create(null)});
     const condition = String(row[2] ?? '').normalize('NFKC').trim().toUpperCase();
     if (!condition) { entry.base = qty; continue; }
-    const m = condition.match(/^(.+?)\s+(\d+)(?:개)?$/u);
+    const m = condition.match(/^(.+?)\s+(\d+)(?:개)?$/u) || condition.match(/^(기모|여름|롱|숏)\s*(\d+)(?:개)?$/u);
     const override = m ? Number(m[2]) : qty;
     const keys = packingOptionKeys(m ? m[1] : condition);
     if (!keys.length || !Number.isSafeInteger(override) || override <= 0) throw new Error('잘못된 패킹 조건: ' + product + ' / ' + condition);
