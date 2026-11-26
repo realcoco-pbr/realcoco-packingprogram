@@ -1684,6 +1684,10 @@ function handlePackingFileDrop(e) {
 }
 
 // 2번 시트 A: 상품명, B: 기본/옵션 수량, C: 옵션 조건
+function packingOptionParts(value) {
+  return String(value ?? '').normalize('NFKC').toUpperCase().trim()
+    .split(/[\s\-–—_\/,·()[\]{}]+/u).filter(Boolean);
+}
 function readPackingRules(wb) {
   const name = wb.SheetNames[1];
   const sheet = name && wb.Sheets[name];
@@ -1695,14 +1699,15 @@ function readPackingRules(wb) {
     const qty = Number(row[1]);
     if (!product || !Number.isInteger(qty) || qty <= 0) continue;
     const entry = rules[product] || (rules[product] = {base:null, options:Object.create(null)});
-    const condition = String(row[2] ?? '').trim().toUpperCase();
+    const condition = String(row[2] ?? '').normalize('NFKC').trim().toUpperCase();
     if (!condition) { entry.base = qty; continue; }
-    const m = condition.match(/^(SF|W|기모|여름|롱|숏)\s*(\d+)?$/u);
-    if (!m) throw new Error('미지원 패킹 조건: ' + product + ' / ' + condition);
-    const override = m[2] ? Number(m[2]) : qty;
-    if (!Number.isSafeInteger(override) || override <= 0) throw new Error('잘못된 패킹 수량: ' + product);
-    if (m[2]) entry.base = qty;
-    entry.options[m[1]] = override;
+    // Optional trailing quantity must be separated by whitespace.
+    const m = condition.match(/^(.+?)\s+(\d+)(?:개)?$/u);
+    const override = m ? Number(m[2]) : qty;
+    const parts = packingOptionParts(m ? m[1] : condition);
+    if (!parts.length || !Number.isSafeInteger(override) || override <= 0) throw new Error('잘못된 패킹 조건: ' + product + ' / ' + condition);
+    if (m) entry.base = qty;
+    entry.options[parts.join(' ')] = override;
   }
   return { name, rules };
 }
@@ -1710,13 +1715,16 @@ function resolvePackingSize(rules, product, option) {
   const entry = rules[String(product ?? '').trim()];
   if (!entry) return 20;
   const opt = String(option ?? '').normalize('NFKC').toUpperCase();
-  // W와 SF는 독립 토큰만 일치; FW, WHITE 등은 제외.
-  const matches = Object.keys(entry.options).filter(key => {
-    if (key === 'W' || key === 'SF') return new RegExp('(^|[^A-Z0-9])' + key + '(?=$|[^A-Z0-9])').test(opt);
-    if (key === '기모') return /기모/.test(opt.replace(/(?:비기모|무기모|기모\s*(?:X|없음|미포함))/g, ''));
-    return opt.includes(key);
-  });
-  const sizes = [...new Set(matches.map(key => entry.options[key]))];
+  const parts = packingOptionParts(opt);
+  const matches = Object.keys(entry.options).map(key => ({key, terms:key.split(' ')})).filter(rule =>
+    rule.terms.every(term => {
+      if (term === '기모') return /기모/.test(opt.replace(/(?:비기모|무기모|기모\s*(?:X|없음|미포함))/g, ''));
+      if (['여름','롱','숏'].includes(term)) return opt.includes(term);
+      return parts.includes(term);
+    })
+  );
+  const specificity = Math.max(0, ...matches.map(rule => rule.terms.length));
+  const sizes = [...new Set(matches.filter(rule => rule.terms.length === specificity).map(rule => entry.options[rule.key]))];
   if (sizes.length > 1) throw new Error('패킹 옵션 조건 충돌: ' + product + ' / ' + option);
   return sizes[0] ?? entry.base ?? 20;
 }
