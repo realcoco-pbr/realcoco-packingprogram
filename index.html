@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>REALCOCO · AI PBR Management System | Packing v2026.11.26.3</title>
+<title>REALCOCO · AI PBR Management System | Packing v2026.11.27.1</title>
 <!-- ========== PWA 아이콘 & 홈화면 설정 ========== -->
 <!-- 브라우저 탭 + 데스크톱 Favicon -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj4KPGRlZnM+CjxsaW5lYXJHcmFkaWVudCBpZD0iYmciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgo8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjZDY2ODQ1Ii8+CjxzdG9wIG9mZnNldD0iNTUlIiBzdG9wLWNvbG9yPSIjYzk1NDJlIi8+CjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI2EzNmIxZSIvPgo8L2xpbmVhckdyYWRpZW50Pgo8L2RlZnM+CjxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iMTA4IiBmaWxsPSJ1cmwoI2JnKSIvPgo8dGV4dCB4PSIyNTYiIHk9IjMyMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsJ1RpbWVzIE5ldyBSb21hbicsc2VyaWYiIGZvbnQtc2l6ZT0iMjQ4IiBmb250LXdlaWdodD0iNjAwIiBmaWxsPSIjZmFmNmVlIiBsZXR0ZXItc3BhY2luZz0iLTEyIj5SQzwvdGV4dD4KPGNpcmNsZSBjeD0iNDA4IiBjeT0iMTMyIiByPSI3IiBmaWxsPSIjZmFmNmVlIiBvcGFjaXR5PSIwLjg1Ii8+Cjx0ZXh0IHg9IjI1NiIgeT0iNDAyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iR2VvcmdpYSxzZXJpZiIgZm9udC1zdHlsZT0iaXRhbGljIiBmb250LXNpemU9IjM0IiBmb250LXdlaWdodD0iNDAwIiBmaWxsPSIjZmFmNmVlIiBvcGFjaXR5PSIwLjc1IiBsZXR0ZXItc3BhY2luZz0iNCI+QUkgUEJSPC90ZXh0Pgo8L3N2Zz4="/>
@@ -1687,23 +1687,30 @@ function handlePackingFileDrop(e) {
 function packingOptionKeys(value) {
   const opt = String(value ?? '').normalize('NFKC').toUpperCase();
   const keys = [];
-  for (const key of ['SF','W']) {
+  for (const key of ['SF','W','SS']) {
     if (new RegExp('(^|[^A-Z0-9])' + key + '(?=$|[^A-Z0-9])').test(opt)) keys.push(key);
   }
   if (/기모/.test(opt.replace(/(?:비기모|무기모|기모\s*(?:X|없음|미포함))/g, ''))) keys.push('기모');
   for (const key of ['여름','롱','숏']) if (opt.includes(key)) keys.push(key);
   return keys;
 }
+// Explicit product-specific packing policy requested 2026-11-27.
+const MALLI_PACKING_NAME = '맬리팬던트니트가디건';
+function malliPackingRule() {
+  return {base:10, options:Object.assign(Object.create(null), {SF:10,W:8,SS:20})};
+}
 function readPackingRules(wb) {
   const name = wb.SheetNames[1];
   const sheet = name && wb.Sheets[name];
   const rules = Object.create(null);
+  rules[MALLI_PACKING_NAME] = malliPackingRule();
   if (!sheet) return { name: '', rules };
   const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:null, range:0});
   for (const row of rows) {
     const product = String(row[0] ?? '').trim();
     const qty = Number(row[1]);
     if (!product || !Number.isInteger(qty) || qty <= 0) continue;
+    if (product === MALLI_PACKING_NAME) continue; // current explicit policy supersedes old workbook rows
     const entry = rules[product] || (rules[product] = {base:null, options:Object.create(null)});
     const condition = String(row[2] ?? '').normalize('NFKC').trim().toUpperCase();
     if (!condition) { entry.base = qty; continue; }
@@ -1723,7 +1730,8 @@ function readPackingRules(wb) {
   return { name, rules };
 }
 function resolvePackingSize(rules, product, option) {
-  const entry = rules[String(product ?? '').trim()];
+  const productName = String(product ?? '').trim();
+  const entry = productName === MALLI_PACKING_NAME ? malliPackingRule() : rules[productName];
   if (!entry) return 20;
   const keys = packingOptionKeys(option);
   const matches = Object.keys(entry.options).map(key => ({key, terms:key.split(' ')}))
