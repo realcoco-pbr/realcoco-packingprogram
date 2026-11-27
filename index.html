@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>REALCOCO · AI PBR Management System | Packing v2026.11.27.1</title>
+<title>REALCOCO · AI PBR Management System | Packing v2026.11.27.2</title>
 <!-- ========== PWA 아이콘 & 홈화면 설정 ========== -->
 <!-- 브라우저 탭 + 데스크톱 Favicon -->
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA1MTIgNTEyIj4KPGRlZnM+CjxsaW5lYXJHcmFkaWVudCBpZD0iYmciIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPgo8c3RvcCBvZmZzZXQ9IjAlIiBzdG9wLWNvbG9yPSIjZDY2ODQ1Ii8+CjxzdG9wIG9mZnNldD0iNTUlIiBzdG9wLWNvbG9yPSIjYzk1NDJlIi8+CjxzdG9wIG9mZnNldD0iMTAwJSIgc3RvcC1jb2xvcj0iI2EzNmIxZSIvPgo8L2xpbmVhckdyYWRpZW50Pgo8L2RlZnM+CjxyZWN0IHdpZHRoPSI1MTIiIGhlaWdodD0iNTEyIiByeD0iMTA4IiBmaWxsPSJ1cmwoI2JnKSIvPgo8dGV4dCB4PSIyNTYiIHk9IjMyMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9Ikdlb3JnaWEsJ1RpbWVzIE5ldyBSb21hbicsc2VyaWYiIGZvbnQtc2l6ZT0iMjQ4IiBmb250LXdlaWdodD0iNjAwIiBmaWxsPSIjZmFmNmVlIiBsZXR0ZXItc3BhY2luZz0iLTEyIj5SQzwvdGV4dD4KPGNpcmNsZSBjeD0iNDA4IiBjeT0iMTMyIiByPSI3IiBmaWxsPSIjZmFmNmVlIiBvcGFjaXR5PSIwLjg1Ii8+Cjx0ZXh0IHg9IjI1NiIgeT0iNDAyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0iR2VvcmdpYSxzZXJpZiIgZm9udC1zdHlsZT0iaXRhbGljIiBmb250LXNpemU9IjM0IiBmb250LXdlaWdodD0iNDAwIiBmaWxsPSIjZmFmNmVlIiBvcGFjaXR5PSIwLjc1IiBsZXR0ZXItc3BhY2luZz0iNCI+QUkgUEJSPC90ZXh0Pgo8L3N2Zz4="/>
@@ -1684,10 +1684,10 @@ function handlePackingFileDrop(e) {
 }
 
 // 2번 시트 A: 상품명, B: 기본/옵션 수량, C: 옵션 조건
-function packingOptionKeys(value) {
+function packingOptionKeys(value, seasonKeys = ['SF', 'W']) {
   const opt = String(value ?? '').normalize('NFKC').toUpperCase();
   const keys = [];
-  for (const key of ['SF','W','SS']) {
+  for (const key of seasonKeys) {
     if (new RegExp('(^|[^A-Z0-9])' + key + '(?=$|[^A-Z0-9])').test(opt)) keys.push(key);
   }
   if (/기모/.test(opt.replace(/(?:비기모|무기모|기모\s*(?:X|없음|미포함))/g, ''))) keys.push('기모');
@@ -1733,7 +1733,8 @@ function resolvePackingSize(rules, product, option) {
   const productName = String(product ?? '').trim();
   const entry = productName === MALLI_PACKING_NAME ? malliPackingRule() : rules[productName];
   if (!entry) return 20;
-  const keys = packingOptionKeys(option);
+  const seasonKeys = productName === MALLI_PACKING_NAME ? Object.keys(entry.options) : undefined;
+  const keys = packingOptionKeys(option, seasonKeys);
   const matches = Object.keys(entry.options).map(key => ({key, terms:key.split(' ')}))
     .filter(rule => rule.terms.every(term => keys.includes(term)));
   const specificity = Math.max(0, ...matches.map(rule => rule.terms.length));
@@ -1754,7 +1755,7 @@ function handlePackingFileSelect(file) {
 
       const {name: foundBoxSheetName, rules} = readPackingRules(wb);
       PACKING_STATE.boxDict = rules;
-      if (!foundBoxSheetName) showToast('⚠️ 두 번째 패킹 기준 시트가 없습니다. 기본 20개 적용', 'warn');
+      if (!foundBoxSheetName) showToast('⚠️ 두 번째 패킹 기준 시트가 없습니다. 상품 전용 기준 또는 기본 수량 적용', 'warn');
 
       // ── list(2) 시트에서 발송 레코드 ──
       const listSheet = wb.Sheets['list (2)'];
